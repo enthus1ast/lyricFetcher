@@ -11,6 +11,8 @@ import unidecode
 import tables
 import options
 
+const userAgent = "Lynx/2.8.6rel.4 libwww-FM/2.14 SSL-MM/1.4.1 OpenSSL/0.9.7l Lynxlet/0.7.0"
+
 type
   Fetcher = ref object of RootObj
     fetchUrl: string
@@ -20,6 +22,8 @@ type
   Azlyrics = ref object of Fetcher
   Genius = ref object of Fetcher
   Musixmatch = ref object of Fetcher
+  Elyrics = ref object of Fetcher
+
   SupportedParsers = Table[string, Fetcher]
 
 proc newLyrcache(): Lyrcache =
@@ -29,26 +33,31 @@ proc newLyrcache(): Lyrcache =
 
 proc newPlyrics(): Plyrics =
   result = Plyrics()
-  result.fetchUrl = "http://www.plyrics.com/lyrics/$artist/$song.html"
+  # result.fetchUrl = "http://www.plyrics.com/lyrics/$artist/$song.html"
   result.matchUrl = "plyrics.com"
 
 proc newAzlyrics(): Azlyrics =
   result = Azlyrics()
-  result.fetchUrl = "https://www.azlyrics.com/lyrics/$artist/$song.html"
+  # result.fetchUrl = "https://www.azlyrics.com/lyrics/$artist/$song.html"
   result.matchUrl = "azlyrics.com"
 
 proc newGenius(): Genius =
   result = Genius()
-  result.fetchUrl = "https://genius.com/$artist-$song-lyrics"
+  # result.fetchUrl = "https://genius.com/$artist-$song-lyrics"
   result.matchUrl = "genius.com"
 
 proc newMusixmatch(): Musixmatch =
   result = Musixmatch()
-  result.fetchUrl = "https://www.musixmatch.com/de/songtext/$artist/$song"
+  # result.fetchUrl = "https://www.musixmatch.com/de/songtext/$artist/$song"
   result.matchUrl = "musixmatch.com"
 
+proc newElyrics(): Elyrics =
+  result = Elyrics()
+  # result.fetchUrl = "https://www.musixmatch.com/de/songtext/$artist/$song"
+  result.matchUrl = "elyrics.net"
+
 proc get*(url: string): Future[string] {.async.} =
-  var client = newAsyncHttpClient()
+  var client = newAsyncHttpClient(userAgent = userAgent)
   return await client.getContent(url)
 
 proc post*(url: string, data: string) {.async.} =
@@ -76,64 +85,52 @@ method fetch(fe: Lyrcache, artist, song: string, url: string = ""): Future[Lyric
   result = parseJson(raw).to(Lyric)
   echo "CACHE HIT!!!!"
 
-method fetch(fe: Plyrics, artist, song: string, url: string = ""): Future[Lyric] {.async.} =
-  if url == "":
-    result.url = fe.fetchUrl % [
-      "artist", artist.delwhitespace().toLower(),
-      "song", song.delwhitespace().toLower()
-    ]
-  else:
-    result.url = url
-  let raw = await get(result.url)
-  result.text = raw.getBetween("<!-- start of lyrics -->", "<!-- end of lyrics -->").cleanHtml()
+method fetch(fe: Plyrics, artist, song: string, url: string): Future[Lyric] {.async.} =
+  result.url = url
   result.artist = artist
   result.song = song
+  let raw = await get(result.url)
+  result.text = raw.getBetween("<!-- start of lyrics -->", "<!-- end of lyrics -->").cleanHtml()
   if result.text.strip().len == 0: raise
 
 method fetch(fe: Azlyrics, artist, song: string, url: string = ""): Future[Lyric] {.async.} =
-  if url == "":
-    result.url = fe.fetchUrl % [
-      "artist", artist.unidecode().delNonAz().toLower().replace("and", "").replace("the", ""),
-      "song", song.unidecode().delNonAz().toLower().replace("and", "").replace("the", "")
-    ]
-  else:
-    result.url = url
+  result.url = url
+  result.artist = artist
+  result.song = song
   echo result.url
   let raw = await get(result.url)
   result.text = raw.getBetween("Sorry about that. -->", "<br><br>").cleanHtml()
-  result.artist = artist
-  result.song = song
   if result.text.strip().len == 0: raise
 
 method fetch(fe: Genius, artist, song: string, url: string = ""): Future[Lyric] {.async.} =
-  if url == "":
-    result.url = fe.fetchUrl % [
-      "artist", artist.delNonAz().toLower().replace("and", "").replace("the", ""),
-      "song", song.delNonAz().toLower().replace("and", "").replace("the", "")
-    ]
-  else:
-    result.url = url
+  result.url = url
+  result.artist = artist
+  result.song = song
   echo result.url
   let raw = await get(result.url)
   result.text = raw.getBetween("""<div class="Lyrics__Container""",  """</div><div class="RightSidebar""").skipStrip("\"").brToNl().cleanHtml()
-  result.artist = artist
-  result.song = song
-  if result.text.strip().len == 0: raise
+  if result.text.strip().len == 0: raise # newException(ValueError, "cannot find in between from: " & raw)
 
 method fetch(fe: Musixmatch, artist, song: string, url: string = ""): Future[Lyric] {.async.} =
-  if url == "":
-    result.url = fe.fetchUrl % [
-      "artist", artist.delNonAz().toLower().replace("and", "").replace("the", ""), # TODO
-      "song", song.delNonAz().toLower().replace("and", "").replace("the", "") # TODO
-    ]
-  else:
-    result.url = url
+  result.url = url
+  result.artist = artist
+  result.song = song
   echo result.url
   let raw = await get(result.url)
   result.text = raw.getBetween("""<span class="lyrics__content__ok">""",  """<div id="" class="lyrics-report"""").cleanJs().cleanHtml()
+  if result.text.strip().len == 0: raise
+
+method fetch(fe: Elyrics, artist, song: string, url: string = ""): Future[Lyric] {.async.} =
+  result.url = url
   result.artist = artist
   result.song = song
+  echo result.url
+  let raw = await get(result.url)
+  result.text = raw.getBetween("""<div id='inlyr'>""",  """</div><br>""").cleanJs().cleanHtml()
   if result.text.strip().len == 0: raise
+
+
+
 
 proc genSupportedParsers(): SupportedParsers =
   block:
@@ -146,11 +143,14 @@ proc genSupportedParsers(): SupportedParsers =
     var fe = newAzlyrics()
     result[fe.matchUrl] = fe
   block:
-    var fe = newGenius()
+    var fe = newElyrics()
     result[fe.matchUrl] = fe
   block:
-    var fe = newMusixmatch()
+    var fe = newGenius()
     result[fe.matchUrl] = fe
+  # block:
+  #   var fe = newMusixmatch()
+  #   result[fe.matchUrl] = fe
 
 ####################################################################################
 # Searcher
@@ -167,7 +167,7 @@ import asyncdispatch
 import strformat
 import random
 
-randomize()
+
 
 type
   Searchengine = ref object of RootObj ## The generic search engines, all of them works quite the same
@@ -248,22 +248,24 @@ proc makeQuery(se: Searchengine, artist, song: string): string =
   let query = fmt"{artist} - {song} lyrics"
   result = se.queryUrl % ["query", query.encodeUrl()]
 
-proc findLyricsUrls(artist, song: string): Future[seq[string]] {.async.} =
-  var engines: seq[Searchengine]
-  engines.add newSeGoogle()
-  engines.add newSeBing()
-  engines.add newSeAsk()
-  engines.add newSeYahoo()
-  # engines.add newSeDuckDuckGo()
-  engines.add newSeExcite()
-  engines.add newSeYandex()
-  # engines.add newSeLycos()
-  # engines.add newSeGenius()
-  engines.shuffle()
-  let query = makeQuery(engines[0], artist, song)
+proc getSearchEngines(): seq[Searchengine] =
+  result = @[]
+  result.add newSeGoogle()
+  result.add newSeBing()
+  result.add newSeAsk()
+  result.add newSeYahoo()
+  # result.add newSeDuckDuckGo()
+  result.add newSeExcite()
+  result.add newSeYandex()
+  # result.add newSeLycos()
+  # result.add newSeGenius()
+  result.shuffle()
+
+proc findLyricsUrls(searchengine: Searchengine, artist, song: string): Future[seq[string]] {.async.} =
+  let query = makeQuery(searchengine, artist, song)
   echo query
   let soup = await get(query)
-  return extractSupportedUrls(engines[0], soup)
+  return extractSupportedUrls(searchengine, soup)
 
 
 ####################################################################################
@@ -272,58 +274,64 @@ proc findLyricsUrls(artist, song: string): Future[seq[string]] {.async.} =
 
 proc fetchLyrics*(artist, title: string): Future[Lyric] {.async.} =
 
-  # Search for urls
-  let urls = await findLyricsUrls(artist, title)
-  if urls.len == 0: raise newException(ValueError, fmt"could not find: {artist} - {title} via searchengine")
-  var supported = genSupportedParsers()
-  for url in urls:
-    var opt = url.supportedParser(supported)
-    if opt.isNone: continue
-    else:
-      echo "Parsing from:", opt.get().matchUrl
-      echo await fetch(opt.get(), "", "", url = url)
-      break
-  # try:
-  #   echo "FETCH CACHE!!!"
-  #   return await fetchLyrcache(artist, title)
-  # except:
-  #   discard
-  #   echo getCurrentExceptionMsg()
-
-  # try:
-  #   echo "fetchPlyrics"
-  #   return await fetchPlyrics(artist, title)
-  # except:
-  #   discard
-
-  # try:
-  #   echo "fetchAzlyrics"
-  #   return await fetchAzlyrics(artist, title)
-  # except:
-  #   discard
-
-  # try:
-  #   echo "fetchGenius"
-  #   return await fetchGenius(artist, title)
-  # except:
-  #   discard
-
-proc cli(artist = "", title = "", apikey = "") =
   try:
-    if artist == "" and title == "": raise
+    echo "FETCH CACHE!!!"
+    return await fetch(newLyrcache(), artist, title)
+  except:
+    discard
+    echo getCurrentExceptionMsg()
+
+
+  var searchengines = getSearchEngines()
+  for searchengine in searchengines:
+
+    # Search for urls
+    let urls = await findLyricsUrls(searchengine, artist, title)
+
+    var supported = genSupportedParsers()
+
+    var parserUrl: seq[(Fetcher, string)] = @[]
+    for url in urls:
+      var opt = url.supportedParser(supported)
+      if opt.isNone: continue
+      parserUrl.add( (opt.get(), url) )
+
+    if parserUrl.len == 0:
+      if urls.len == 0:
+        echo fmt"could not find: {artist} - {title} via searchengine"
+        continue
+      # echo "Search engine "
+
+    for (parser, url) in parserUrl:
+      try:
+        echo "Parsing from:", parser.matchUrl
+        return await fetch(parser, artist, title, url = url)
+      except:
+        echo "Could not get lyrics: " & url
+        echo getCurrentExceptionMsg()
+
+
+proc cli(artist: string, title: string, apikey = "") =
+  try:
+    # if artist == "" and title == "": raise
     let lyric = waitFor fetchLyrics(artist, title)
-    # echo "LYRICS ======================================="
-    # echo lyric.text
-    # echo "=============================================="
-    # if lyric.text.strip().len > 0:
-    #   waitFor lyric.pushToLyrcache("123")
+    echo "LYRICS ======================================="
+    echo lyric.text
+    echo "=============================================="
+    if lyric.text.strip().len > 0:
+      waitFor lyric.pushToLyrcache("123")
   except:
     echo "Could not fetch lyrics: ", getCurrentExceptionMsg()
 
 when isMainModule:
-  # echo "King Gizzard & The Lizard Wizard".delNonAz()
+  randomize()
   import cligen
   dispatch(cli)
+
+
+  # randomize(5)
+  # echo waitFor fetch(newElyrics(), "", "", "lyrics...")
+  # echo waitFor fetch(newGenius(), "", "", "lyrics...")
 
   # a
   # echo waitFor fetchPlyrics("Hand Guns", "selfportrait")

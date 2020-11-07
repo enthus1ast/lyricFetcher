@@ -1,4 +1,4 @@
-import strutils
+import strutils, strformat
 
 proc delwhitespace*(str: string): string =
   for ch in str:
@@ -13,13 +13,13 @@ proc delNonAz*(str: string): string =
 
 proc getBetween*(str, startTag, endTag: string): string =
   var startIdx = str.find(startTag)
-  if startIdx == -1: raise
+  if startIdx == -1: raise newException(ValueError, fmt"Could not find start tag: {startTag} in: \n {str}" )
   startIdx.inc startTag.len
 
   var endIdx = str.find(endTag, startIdx)
-  if endIdx == -1: raise
+  if endIdx == -1: raise newException(ValueError, fmt"Could not find end tag: {endTag} in: \n {str}")
 
-  if endIdx < startIdx: raise
+  if endIdx < startIdx: raise newException(ValueError, "endIdx is smaller than startIdx")
 
   return str[startIdx .. endIdx - 1]
 
