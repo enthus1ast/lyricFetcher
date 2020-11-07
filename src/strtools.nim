@@ -36,6 +36,24 @@ proc cleanHtml*(str: string): string =
     if intag: continue
     else: result.add ch
 
+proc cut*(str: string, startPos, endPos: int, fillWith = ""): string =
+  result = str[0 .. startPos - 1]
+  result &= fillWith
+  result &= str[endPos .. ^1]
+
+proc cleanJs*(str: string): string =
+  const startTag = "<script"
+  const endTag = "/script>"
+  result = str
+  while result.find(startTag) > 0:
+    let startPos = result.find(startTag)
+    var endPos = result.find(endTag, startPos)
+    if endPos == -1:
+      raise newException(ValueError, "could not find end tag:" & endTag)
+    else:
+      endpos += endTag.len
+    result = result.cut(startPos, endPos, fillWith = " ")
+
 proc brToNl*(str: string): string =
   return str.replace("<br>", "\n").replace("<br/>", "\n")
   # str.multiReplace(
